@@ -39,7 +39,7 @@
         {{-- DREAPTA: Review --}}
         <div class="relative bg-gray-800 text-gray-100 rounded-2xl p-4 shadow-lg border border-gray-700 overflow-auto h-[60vh]">
             <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-3 flex-wrap">
                     <h2 class="text-lg font-semibold text-green-400">🔍 Rezultatul analizei</h2>
 
                     {{-- Badge decizie --}}
@@ -57,6 +57,26 @@
                                 DECISION: BLOCK
                             </span>
                         @endif
+                    @endif
+
+                    {{-- Badge estimare timp (dacă există) --}}
+                    @if(!is_null($estimateMinutes))
+                        @php
+                            $mins = (int) $estimateMinutes;
+                            $h = intdiv($mins, 60);
+                            $m = $mins % 60;
+                            $label = $h > 0 ? ($h . 'h' . ($m > 0 ? ' ' . $m . 'm' : '')) : ($m . 'm');
+                        @endphp
+                        <span class="inline-block px-2 py-1 rounded-md text-xs font-semibold bg-slate-700/50 text-slate-200 border border-slate-500" title="Timp estimat de remediere">
+                            ⏱️ ~{{ $label }}
+                        </span>
+                    @endif
+
+                    {{-- Badge tokeni consumați (dacă există) --}}
+                    @if(!is_null($tokensUsed))
+                        <span class="inline-block px-2 py-1 rounded-md text-xs font-semibold bg-indigo-700/40 text-indigo-200 border border-indigo-600" title="Tokeni folosiți (prompt + răspuns)">
+                            🔢 {{ number_format($tokensUsed, 0, '.', ' ') }} tok
+                        </span>
                     @endif
                 </div>
 

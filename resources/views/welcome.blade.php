@@ -50,16 +50,16 @@
                 </nav>
             @endif
         </header>
+        <flux:heading class="text-lg text-white">AI Code Reviewer</flux:heading>
         <div class="flex items-center justify-center w-full transition-opacity opacity-100 duration-750 lg:grow starting:opacity-0">
             <main class="flex max-w-[335px] w-full flex-col-reverse lg:max-w-4xl lg:flex-row">
                <div class="max-w-4xl text-center">
-                    <h5 class="text-white text-7xl  tracking-tight">
-                    Ai Code Reviewer
-                    </h5>
+                
+                    
                     <p class="mt-4 text-lg text-white md:text-xl leading-relaxed">
                     O aplicație de Inteligență Artificială (IA) care analizează codul pentru dezvoltatori, identifică bug-uri și vulnerabilități, sugerează refactorizări, oferă recomandări de performanță și explică clar deciziile, integrându-se ușor în fluxuri de lucru cu pull request-uri.
                     </p>
-  </div>
+                    </div>
 
 
             </main>

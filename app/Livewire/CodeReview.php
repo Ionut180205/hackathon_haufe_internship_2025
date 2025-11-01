@@ -21,6 +21,12 @@ class CodeReview extends Component
     public $decision = ''; // PASS | WARN | BLOCK
     public $precommitError = '';
 
+    // Estimare timp remediere (minute)
+    public $estimateMinutes = null;
+
+    // Tokeni consumați (prompt + răspuns)
+    public $tokensUsed = null;
+
     protected $listeners = [
         // QuickFix aplică automat codul reparat aici
         'apply-fixed-code' => 'applyFixedCode',
@@ -30,19 +36,19 @@ class CodeReview extends Component
     {
         return view('livewire.code-review');
     }
+
     public function openQuickFix(): void
-{
-    // deschidem modalul doar dacă există un review și nu e deja PASS
-    if (!$this->review || $this->decision === 'PASS') {
-        return;
+    {
+        // deschidem modalul doar dacă există un review și nu e deja PASS
+        if (!$this->review || $this->decision === 'PASS') {
+            return;
+        }
+
+        $fileName = $this->uploadedFile?->getClientOriginalName() ?? '';
+
+        // trimite contextul către componenta QuickFix
+        $this->dispatch('open-quick-fix', code: $this->code, review: $this->review, fileName: $fileName);
     }
-
-    $fileName = $this->uploadedFile?->getClientOriginalName() ?? '';
-
-    // trimite contextul către componenta QuickFix
-    $this->dispatch('open-quick-fix', code: $this->code, review: $this->review, fileName: $fileName);
-}
-
 
     public function analyzeCode()
     {
@@ -55,6 +61,8 @@ class CodeReview extends Component
         $this->review = '';
         $this->decision = '';
         $this->precommitError = '';
+        $this->estimateMinutes = null;
+        $this->tokensUsed = null;
         $this->saved = false;
         $this->loading = true;
 
@@ -65,8 +73,10 @@ class CodeReview extends Component
 
             $system = 'Ești un expert în code review. Răspunde în română. '
                     . 'Structurează pe: Probleme, De ce contează, Cum se repară. '
-                    . 'LA FINAL, pe o linie separată, scrie EXACT: DECISION: PASS sau WARN sau BLOCK '
-                    . '(BLOCK pentru vulnerabilități/erori majore; WARN pentru probleme minore; PASS dacă e ok).';
+                    . 'LA FINAL, pe linii separate, scrie EXACT: '
+                    . 'DECISION: PASS sau WARN sau BLOCK '
+                    . 'și ESTIMATE_MINUTES: <număr întreg de minute (doar cifre)>. '
+                    . 'Dacă poți, include și TOKENS_USED: <număr întreg> pe o linie separată.';
 
             $user = "Fă un code review clar și acționabil pentru următorul cod:\n\n" . $this->code;
 
@@ -94,8 +104,21 @@ class CodeReview extends Component
                 // Extrage DECISION: PASS/WARN/BLOCK
                 $this->decision = $this->extractDecision($text) ?: 'WARN';
 
-                // Păstrează review-ul fără linia DECISION pentru display
-                $this->review = $this->stripDecisionLine($text);
+                // Extrage ESTIMATE_MINUTES
+                $this->estimateMinutes = $this->extractEstimate($text);
+
+                // Tokeni din metadatele Ollama (preferat)
+                $promptTokens = $data['prompt_eval_count'] ?? null;
+                $completionTokens = $data['eval_count'] ?? null;
+                if ($promptTokens !== null || $completionTokens !== null) {
+                    $this->tokensUsed = (int) (($promptTokens ?? 0) + ($completionTokens ?? 0));
+                } else {
+                    // Fallback: încearcă să citești din text (TOKENS_USED: X)
+                    $this->tokensUsed = $this->extractTokens($text);
+                }
+
+                // Păstrează review-ul fără liniile meta (DECISION / ESTIMATE / TOKENS) pentru display
+                $this->review = $this->stripMetaLines($text);
             }
 
             // (opțional) notifică ReviewChat că există un review nou
@@ -123,6 +146,7 @@ class CodeReview extends Component
         // activăm butonul de Commit
         $this->decision = 'PASS';
         $this->precommitError = '';
+        // estimarea / tokenii rămân neschimbați
     }
 
     public function saveReview()
@@ -138,12 +162,21 @@ class CodeReview extends Component
             return;
         }
 
+        // Anexăm metadatele la finalul review-ului salvat
+        $meta = "\n\n[DECISION: {$this->decision}]";
+        if ($this->estimateMinutes !== null) {
+            $meta .= "\n[ESTIMATE_MINUTES: {$this->estimateMinutes}]";
+        }
+        if ($this->tokensUsed !== null) {
+            $meta .= "\n[TOKENS: {$this->tokensUsed}]";
+        }
+
         CodeReviewEntry::create([
             'file_name' => $this->uploadedFile?->getClientOriginalName(),
             'mime_type' => $this->uploadedFile?->getMimeType(),
             'file_size' => $this->uploadedFile?->getSize(),
             'code'      => $this->code,
-            'review'    => $this->review . "\n\n[DECISION: {$this->decision}]",
+            'review'    => $this->review . $meta,
         ]);
 
         $this->saved = true;
@@ -151,15 +184,38 @@ class CodeReview extends Component
 
     private function extractDecision(string $text): string
     {
-        if (preg_match('/DECISION:\s*(PASS|WARN|BLOCK)\s*$/i', trim($text), $m)) {
+        if (preg_match('/DECISION:\s*(PASS|WARN|BLOCK)\s*$/im', trim($text), $m)) {
             return strtoupper($m[1]);
         }
         return '';
     }
 
-    private function stripDecisionLine(string $text): string
+    private function extractEstimate(string $text): ?int
     {
-        return preg_replace('/\n?DECISION:\s*(PASS|WARN|BLOCK)\s*$/i', '', trim($text));
+        // Acceptă "ESTIMATE_MINUTES: 45" sau "ESTIMATE: 45"
+        if (preg_match('/ESTIMATE(?:_MINUTES)?:\s*(\d+)\s*$/im', trim($text), $m)) {
+            return (int) $m[1];
+        }
+        return null;
+    }
+
+    private function extractTokens(string $text): ?int
+    {
+        // Acceptă "TOKENS_USED: 1234" sau "TOKENS: 1234"
+        if (preg_match('/TOKENS(?:_USED)?:\s*(\d+)\s*$/im', trim($text), $m)) {
+            return (int) $m[1];
+        }
+        return null;
+    }
+
+    private function stripMetaLines(string $text): string
+    {
+        $clean = trim($text);
+        // elimină eventual mai multe linii meta în orice ordine (de jos în sus)
+        $clean = preg_replace('/\n?DECISION:\s*(PASS|WARN|BLOCK)\s*$/im', '', $clean);
+        $clean = preg_replace('/\n?ESTIMATE(?:_MINUTES)?:\s*\d+\s*$/im', '', $clean);
+        $clean = preg_replace('/\n?TOKENS(?:_USED)?:\s*\d+\s*$/im', '', $clean);
+        return trim($clean);
     }
 
     public function clearSaved(){
